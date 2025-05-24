@@ -254,7 +254,8 @@ def start_comfyui(asyncio_loop=None):
         temp_dir = os.path.join(os.path.abspath(args.temp_directory), "temp")
         logging.info(f"Setting temp directory to: {temp_dir}")
         folder_paths.set_temp_directory(temp_dir)
-    cleanup_temp()
+    if not args.no_cleanup_temp:
+        cleanup_temp()
 
     if args.windows_standalone_build:
         try:
