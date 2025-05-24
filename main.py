@@ -150,6 +150,14 @@ def cuda_malloc_warning():
             logging.warning("\nWARNING: this card most likely does not support cuda-malloc, if you get \"CUDA error\" please run ComfyUI with: --disable-cuda-malloc\n")
 
 
+def prompt_autosave(q):
+    while True:
+        time.sleep(args.autosave_interval)
+        with q.mutex:
+            logging.info("Autosaving queue and history")
+            q.save_queue()
+            q.save_history()
+
 def prompt_worker(q, server_instance):
     current_time: float = 0.0
     cache_type = execution.CacheType.CLASSIC
@@ -294,6 +302,7 @@ def start_comfyui(asyncio_loop=None):
     hijack_progress(prompt_server)
 
     threading.Thread(target=prompt_worker, daemon=True, args=(prompt_server.prompt_queue, prompt_server,)).start()
+    threading.Thread(target=prompt_autosave, daemon=True, args=(prompt_server.prompt_queue,)).start()
 
     if args.quick_test_for_ci:
         exit(0)

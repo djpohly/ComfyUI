@@ -1,11 +1,15 @@
 import copy
 import heapq
 import inspect
+import itertools
+import json
 import logging
+import os
 import sys
 import threading
 import time
 import traceback
+from datetime import datetime
 from enum import Enum
 from typing import List, Literal, NamedTuple, Optional
 
@@ -28,6 +32,7 @@ from comfy_execution.graph import (
 )
 from comfy_execution.graph_utils import GraphBuilder, is_link
 from comfy_execution.validation import validate_node_input
+import folder_paths
 
 
 class ExecutionResult(Enum):
@@ -912,10 +917,12 @@ def validate_prompt(prompt):
 
     return (True, None, list(good_outputs), node_errors)
 
+QUEUE_FILE = "queue.json"
+HISTORY_FILE = "history.json"
 MAXIMUM_HISTORY_SIZE = 10000
 
 class PromptQueue:
-    def __init__(self, server):
+    def __init__(self, server, persist=False):
         self.server = server
         self.mutex = threading.RLock()
         self.not_empty = threading.Condition(self.mutex)
@@ -924,10 +931,17 @@ class PromptQueue:
         self.currently_running = {}
         self.history = {}
         self.flags = {}
+        self.persist = persist
+        self.queue_dirty = False
+        self.history_dirty = False
+        self.load_history()
+        self.load_queue()
+        server.number = self.next_index()
 
     def put(self, item):
         with self.mutex:
             heapq.heappush(self.queue, item)
+            self.queue_dirty = True
             self.server.queue_updated()
             self.not_empty.notify()
 
@@ -941,8 +955,20 @@ class PromptQueue:
             i = self.task_counter
             self.currently_running[i] = copy.deepcopy(item)
             self.task_counter += 1
+            self.queue_dirty = True
             self.server.queue_updated()
             return (item, i)
+
+    def next_index(self):
+        with self.mutex:
+            # Using max(..., default=0) would allow this to be negative, which
+            # breaks assumptions made in the "add to front" functionality.
+            return max(itertools.chain(
+                [0],
+                (prompt[0] for prompt in self.queue),
+                (prompt[0] for prompt in self.currently_running),
+                (entry["prompt"][0] for entry in self.history.values()),
+            ))
 
     class ExecutionStatus(NamedTuple):
         status_str: Literal['success', 'error']
@@ -966,6 +992,8 @@ class PromptQueue:
                 'status': status_dict,
             }
             self.history[prompt[1]].update(history_result)
+            self.history_dirty = True
+            self.queue_dirty = True
             self.server.queue_updated()
 
     # Note: slow
@@ -990,6 +1018,7 @@ class PromptQueue:
     def wipe_queue(self):
         with self.mutex:
             self.queue = []
+            self.queue_dirty = True
             self.server.queue_updated()
 
     def delete_queue_item(self, function):
@@ -1001,6 +1030,7 @@ class PromptQueue:
                     else:
                         self.queue.pop(x)
                         heapq.heapify(self.queue)
+                    self.queue_dirty = True
                     self.server.queue_updated()
                     return True
         return False
@@ -1026,11 +1056,13 @@ class PromptQueue:
 
     def wipe_history(self):
         with self.mutex:
-            self.history = {}
+            self.history.clear()
+            self.history_dirty = True
 
     def delete_history_item(self, id_to_delete):
         with self.mutex:
             self.history.pop(id_to_delete, None)
+            self.history_dirty = True
 
     def set_flag(self, name, data):
         with self.mutex:
@@ -1045,3 +1077,98 @@ class PromptQueue:
                 return ret
             else:
                 return self.flags.copy()
+
+    def load_history(self):
+        if not self.persist:
+            return
+        user_directory = folder_paths.get_user_directory()
+        filepath = os.path.abspath(os.path.join(user_directory, HISTORY_FILE))
+        if os.path.isfile(filepath):
+            logging.info(f"Loading history from {filepath}")
+            try:
+                with open(filepath) as f:
+                    with self.mutex:
+                        self.history.update(json.load(f))
+            except:
+                logging.error(f"The history file is corrupted: {filepath}")
+                return
+        logging.info("... loading history completed.")
+
+    def save_history(self):
+        if not self.persist or not self.history_dirty:
+            return
+        user_directory = folder_paths.get_user_directory()
+        filepath = os.path.abspath(os.path.join(user_directory, HISTORY_FILE))
+
+        # Make a backup if necessary
+        # Change "w" to "wx" below if you uncomment this?
+        # if os.path.exists(filepath):
+        #     if not os.path.isfile(filepath):
+        #         logging.error(f"The history file is not a file, not saving: {filepath}")
+        #         return
+
+        #     mtime = os.path.getmtime(filepath)
+        #     timestr = datetime.fromtimestamp(mtime).strftime("%Y%m%d-%H%M%S")
+        #     os.rename(filepath, f"history-{timestr}.json")
+
+        # Save the history
+        logging.info(f"Saving history to {filepath}")
+        with open(filepath + ".new", "w") as f:
+            json.dump(self.history, f, indent=None, separators=(',', ':'))
+            #f.write(json.dumps(self.history, indent=4))
+        os.replace(filepath + ".new", filepath)
+        logging.info("... saving history completed.")
+        self.history_dirty = False
+
+    def load_queue(self):
+        if not self.persist:
+            return
+        user_directory = folder_paths.get_user_directory()
+        filepath = os.path.abspath(os.path.join(user_directory, QUEUE_FILE))
+        if os.path.isfile(filepath):
+            logging.info(f"Loading queue from {filepath}")
+            try:
+                with open(filepath) as f:
+                    loaded = json.load(f)
+            except:
+                logging.error(f"The queue file is corrupted: {filepath}")
+                return
+
+            with self.mutex:
+                if isinstance(loaded, dict):
+                    # Accept data in /api/queue format
+                    for items in loaded.values():
+                        self.queue.extend(map(tuple, items))
+                else:
+                    # Accept data in get_current_queue() format
+                    for items in loaded:
+                        self.queue.extend(map(tuple, items))
+                heapq.heapify(self.queue)
+            logging.info("... loading queue completed")
+
+    def save_queue(self):
+        if not self.persist or not self.queue_dirty:
+            return
+        user_directory = folder_paths.get_user_directory()
+        filepath = os.path.abspath(os.path.join(user_directory, QUEUE_FILE))
+
+        # Make a backup if necessary
+        # Change "w" to "wx" below if you uncomment this?
+        # if os.path.exists(filepath):
+        #     if not os.path.isfile(filepath):
+        #         logging.error(f"The queue file is not a file, not saving: {filepath}")
+        #         return
+
+        #     mtime = os.path.getmtime(filepath)
+        #     timestr = datetime.fromtimestamp(mtime).strftime("%Y%m%d-%H%M%S")
+        #     os.rename(filepath, f"queue-{timestr}.json")
+
+        # Save the queue
+        logging.info(f"Saving queue to {filepath}")
+        current, pending = self.get_current_queue()
+        with open(filepath + ".new", "w") as f:
+            json.dump({"queue_current": current, "queue_pending": pending}, f, indent=None, separators=(',', ':'))
+            #f.write(json.dumps(self.get_current_queue(), indent=4))
+        os.replace(filepath + ".new", filepath)
+        logging.info("... saving queue completed")
+        self.queue_dirty = False
