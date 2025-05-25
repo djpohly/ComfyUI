@@ -326,4 +326,5 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         logging.info("\nStopped server")
 
-    cleanup_temp()
+    if not args.no_cleanup_temp:
+        cleanup_temp()
