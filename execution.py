@@ -915,6 +915,8 @@ class PromptQueue:
         self.history = {}
         self.flags = {}
         self.persist = persist
+        self.queue_dirty = False
+        self.history_dirty = False
         server.prompt_queue = self
         self.load_history()
         self.load_queue()
@@ -923,7 +925,7 @@ class PromptQueue:
     def put(self, item):
         with self.mutex:
             heapq.heappush(self.queue, item)
-            self.save_queue()
+            self.queue_dirty = True
             self.server.queue_updated()
             self.not_empty.notify()
 
@@ -937,7 +939,7 @@ class PromptQueue:
             i = self.task_counter
             self.currently_running[i] = copy.deepcopy(item)
             self.task_counter += 1
-            self.save_queue()
+            self.queue_dirty = True
             self.server.queue_updated()
             return (item, i)
 
@@ -974,8 +976,8 @@ class PromptQueue:
                 'status': status_dict,
             }
             self.history[prompt[1]].update(history_result)
-            self.save_history()
-            self.save_queue()
+            self.history_dirty = True
+            self.queue_dirty = True
             self.server.queue_updated()
 
     def get_current_queue(self):
@@ -992,7 +994,7 @@ class PromptQueue:
     def wipe_queue(self):
         with self.mutex:
             self.queue = []
-            self.save_queue()
+            self.queue_dirty = True
             self.server.queue_updated()
 
     def delete_queue_item(self, function):
@@ -1004,7 +1006,7 @@ class PromptQueue:
                     else:
                         self.queue.pop(x)
                         heapq.heapify(self.queue)
-                    self.save_queue()
+                    self.queue_dirty = True
                     self.server.queue_updated()
                     return True
         return False
@@ -1031,12 +1033,12 @@ class PromptQueue:
     def wipe_history(self):
         with self.mutex:
             self.history.clear()
-            self.save_history()
+            self.history_dirty = True
 
     def delete_history_item(self, id_to_delete):
         with self.mutex:
             self.history.pop(id_to_delete, None)
-            self.save_history()
+            self.history_dirty = True
 
     def set_flag(self, name, data):
         with self.mutex:
@@ -1069,7 +1071,7 @@ class PromptQueue:
         logging.info("... loading history completed.")
 
     def save_history(self):
-        if not self.persist:
+        if not self.persist or not self.history_dirty:
             return
         user_directory = folder_paths.get_user_directory()
         filepath = os.path.abspath(os.path.join(user_directory, HISTORY_FILE))
@@ -1091,6 +1093,7 @@ class PromptQueue:
             json.dump(self.history, f, indent=None, separators=(',', ':'))
             #f.write(json.dumps(self.history, indent=4))
         logging.info("... saving history completed.")
+        self.history_dirty = False
 
     def load_queue(self):
         if not self.persist:
@@ -1119,7 +1122,7 @@ class PromptQueue:
             logging.info("... loading queue completed")
 
     def save_queue(self):
-        if not self.persist:
+        if not self.persist or not self.queue_dirty:
             return
         user_directory = folder_paths.get_user_directory()
         filepath = os.path.abspath(os.path.join(user_directory, QUEUE_FILE))
@@ -1142,3 +1145,4 @@ class PromptQueue:
             json.dump({"queue_current": current, "queue_pending": pending}, f, indent=None, separators=(',', ':'))
             #f.write(json.dumps(self.get_current_queue(), indent=4))
         logging.info("... saving queue completed")
+        self.queue_dirty = False
