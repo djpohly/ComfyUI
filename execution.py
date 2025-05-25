@@ -1089,9 +1089,10 @@ class PromptQueue:
 
         # Save the history
         logging.info(f"Saving history to {filepath}")
-        with open(filepath, "w") as f:
+        with open(filepath + ".new", "w") as f:
             json.dump(self.history, f, indent=None, separators=(',', ':'))
             #f.write(json.dumps(self.history, indent=4))
+        os.replace(filepath + ".new", filepath)
         logging.info("... saving history completed.")
         self.history_dirty = False
 
@@ -1141,8 +1142,9 @@ class PromptQueue:
         # Save the queue
         logging.info(f"Saving queue to {filepath}")
         current, pending = self.get_current_queue()
-        with open(filepath, "w") as f:
+        with open(filepath + ".new", "w") as f:
             json.dump({"queue_current": current, "queue_pending": pending}, f, indent=None, separators=(',', ':'))
             #f.write(json.dumps(self.get_current_queue(), indent=4))
+        os.replace(filepath + ".new", filepath)
         logging.info("... saving queue completed")
         self.queue_dirty = False
