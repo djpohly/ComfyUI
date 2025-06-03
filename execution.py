@@ -936,7 +936,6 @@ class PromptQueue:
         self.history_dirty = False
         self.load_history()
         self.load_queue()
-        server.number = self.next_index()
 
     def put(self, item):
         with self.mutex:
@@ -961,14 +960,14 @@ class PromptQueue:
 
     def next_index(self):
         with self.mutex:
-            # Using max(..., default=0) would allow this to be negative, which
+            # Using max(..., default=-1) would allow this to be negative, which
             # breaks assumptions made in the "add to front" functionality.
             return max(itertools.chain(
-                [0],
+                [-1],
                 (prompt[0] for prompt in self.queue),
                 (prompt[0] for prompt in self.currently_running),
                 (entry["prompt"][0] for entry in self.history.values()),
-            ))
+            )) + 1
 
     class ExecutionStatus(NamedTuple):
         status_str: Literal['success', 'error']
