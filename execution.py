@@ -9,7 +9,6 @@ import sys
 import threading
 import time
 import traceback
-from datetime import datetime
 from enum import Enum
 from typing import List, Literal, NamedTuple, Optional
 
@@ -1096,25 +1095,14 @@ class PromptQueue:
     def save_history(self):
         if not self.persist or not self.history_dirty:
             return
+
         user_directory = folder_paths.get_user_directory()
         filepath = os.path.abspath(os.path.join(user_directory, HISTORY_FILE))
-
-        # Make a backup if necessary
-        # Change "w" to "wx" below if you uncomment this?
-        # if os.path.exists(filepath):
-        #     if not os.path.isfile(filepath):
-        #         logging.error(f"The history file is not a file, not saving: {filepath}")
-        #         return
-
-        #     mtime = os.path.getmtime(filepath)
-        #     timestr = datetime.fromtimestamp(mtime).strftime("%Y%m%d-%H%M%S")
-        #     os.rename(filepath, f"history-{timestr}.json")
 
         # Save the history
         logging.info(f"Saving history to {filepath}")
         with open(filepath + ".new", "w") as f:
             json.dump(self.history, f, indent=None, separators=(',', ':'))
-            #f.write(json.dumps(self.history, indent=4))
         os.replace(filepath + ".new", filepath)
         logging.info("... saving history completed.")
         self.history_dirty = False
@@ -1151,23 +1139,11 @@ class PromptQueue:
         user_directory = folder_paths.get_user_directory()
         filepath = os.path.abspath(os.path.join(user_directory, QUEUE_FILE))
 
-        # Make a backup if necessary
-        # Change "w" to "wx" below if you uncomment this?
-        # if os.path.exists(filepath):
-        #     if not os.path.isfile(filepath):
-        #         logging.error(f"The queue file is not a file, not saving: {filepath}")
-        #         return
-
-        #     mtime = os.path.getmtime(filepath)
-        #     timestr = datetime.fromtimestamp(mtime).strftime("%Y%m%d-%H%M%S")
-        #     os.rename(filepath, f"queue-{timestr}.json")
-
         # Save the queue
         logging.info(f"Saving queue to {filepath}")
         current, pending = self.get_current_queue()
         with open(filepath + ".new", "w") as f:
             json.dump({"queue_current": current, "queue_pending": pending}, f, indent=None, separators=(',', ':'))
-            #f.write(json.dumps(self.get_current_queue(), indent=4))
         os.replace(filepath + ".new", filepath)
         logging.info("... saving queue completed")
         self.queue_dirty = False
