@@ -987,7 +987,7 @@ def tiled_scale_multidim(samples, function, tile=(64, 64), overlap=8, upscale_am
 def tiled_scale(samples, function, tile_x=64, tile_y=64, overlap = 8, upscale_amount = 4, out_channels = 3, output_device="cpu", pbar = None):
     return tiled_scale_multidim(samples, function, (tile_y, tile_x), overlap=overlap, upscale_amount=upscale_amount, out_channels=out_channels, output_device=output_device, pbar=pbar)
 
-PROGRESS_BAR_ENABLED = True
+PROGRESS_BAR_ENABLED = False
 def set_progress_bar_enabled(enabled):
     global PROGRESS_BAR_ENABLED
     PROGRESS_BAR_ENABLED = enabled
