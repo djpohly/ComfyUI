@@ -4,6 +4,7 @@ import inspect
 import itertools
 import json
 import logging
+import orjson
 import os
 import sys
 import threading
@@ -1033,6 +1034,9 @@ class PromptQueue:
                     return True
         return False
 
+    def get_history_volatile(self):
+        return self.history
+
     def get_history(self, prompt_id=None, max_items=None, offset=-1):
         with self.mutex:
             if prompt_id is None:
@@ -1084,9 +1088,9 @@ class PromptQueue:
         if os.path.isfile(filepath):
             logging.info(f"Loading history from {filepath}")
             try:
-                with open(filepath) as f:
+                with open(filepath, "rb") as f:
                     with self.mutex:
-                        self.history.update(json.load(f))
+                        self.history.update(orjson.loads(f.read()))
             except:
                 logging.error(f"The history file is corrupted: {filepath}")
                 return
@@ -1098,14 +1102,16 @@ class PromptQueue:
 
         user_directory = folder_paths.get_user_directory()
         filepath = os.path.abspath(os.path.join(user_directory, HISTORY_FILE))
+        temppath = os.path.abspath(os.path.join(user_directory, "." + HISTORY_FILE + ".new"))
 
         # Save the history
         logging.info(f"Saving history to {filepath}")
-        with open(filepath + ".new", "w") as f:
-            json.dump(self.history, f, indent=None, separators=(',', ':'))
-        os.replace(filepath + ".new", filepath)
+        with self.mutex:
+            with open(temppath, "wb") as f:
+                f.write(orjson.dumps(self.history))
+            os.replace(temppath, filepath)
+            self.history_dirty = False
         logging.info("... saving history completed.")
-        self.history_dirty = False
 
     def load_queue(self):
         if not self.persist:
@@ -1115,8 +1121,8 @@ class PromptQueue:
         if os.path.isfile(filepath):
             logging.info(f"Loading queue from {filepath}")
             try:
-                with open(filepath) as f:
-                    loaded = json.load(f)
+                with open(filepath, "rb") as f:
+                    loaded = orjson.loads(f.read())
             except:
                 logging.error(f"The queue file is corrupted: {filepath}")
                 return
@@ -1138,12 +1144,17 @@ class PromptQueue:
             return
         user_directory = folder_paths.get_user_directory()
         filepath = os.path.abspath(os.path.join(user_directory, QUEUE_FILE))
+        temppath = os.path.abspath(os.path.join(user_directory, "." + QUEUE_FILE + ".new"))
 
         # Save the queue
         logging.info(f"Saving queue to {filepath}")
-        current, pending = self.get_current_queue()
-        with open(filepath + ".new", "w") as f:
-            json.dump({"queue_current": current, "queue_pending": pending}, f, indent=None, separators=(',', ':'))
-        os.replace(filepath + ".new", filepath)
+        current, pending = self.get_current_queue_volatile()
+        with open(temppath, "wb") as f:
+            f.write(orjson.dumps({
+                "queue_current": current,
+                "queue_pending": pending,
+            }))
+
+        os.replace(temppath, filepath)
         logging.info("... saving queue completed")
         self.queue_dirty = False

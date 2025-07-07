@@ -9,6 +9,7 @@ import execution
 import uuid
 import urllib
 import json
+import orjson
 import glob
 import struct
 import ssl
@@ -109,6 +110,10 @@ def is_loopback(host):
             pass
 
     return loopback
+
+
+def dumps(*args, **kwargs):
+    return orjson.dumps(*args, **kwargs).decode()
 
 
 def create_origin_only_middleware():
@@ -229,13 +234,13 @@ class PromptServer():
         @routes.get("/embeddings")
         def get_embeddings(request):
             embeddings = folder_paths.get_filename_list("embeddings")
-            return web.json_response(list(map(lambda a: os.path.splitext(a)[0], embeddings)))
+            return web.json_response(list(map(lambda a: os.path.splitext(a)[0], embeddings)), dumps=dumps)
 
         @routes.get("/models")
         def list_model_types(request):
             model_types = list(folder_paths.folder_names_and_paths.keys())
 
-            return web.json_response(model_types)
+            return web.json_response(model_types, dumps=dumps)
 
         @routes.get("/models/{folder}")
         async def get_models(request):
@@ -243,7 +248,7 @@ class PromptServer():
             if not folder in folder_paths.folder_names_and_paths:
                 return web.Response(status=404)
             files = folder_paths.get_filename_list(folder)
-            return web.json_response(files)
+            return web.json_response(files, dumps=dumps)
 
         @routes.get("/extensions")
         async def get_extensions(request):
@@ -257,7 +262,7 @@ class PromptServer():
                 extensions.extend(list(map(lambda f: "/extensions/" + urllib.parse.quote(
                     name) + "/" + os.path.relpath(f, dir).replace("\\", "/"), files)))
 
-            return web.json_response(extensions)
+            return web.json_response(extensions, dumps=dumps)
 
         def get_dir_by_type(dir_type):
             if dir_type is None:
@@ -330,7 +335,7 @@ class PromptServer():
                         with open(filepath, "wb") as f:
                             f.write(image.file.read())
 
-                return web.json_response({"name" : filename, "subfolder": subfolder, "type": image_upload_type})
+                return web.json_response({"name" : filename, "subfolder": subfolder, "type": image_upload_type}, dumps=dumps)
             else:
                 return web.Response(status=400)
 
@@ -511,7 +516,7 @@ class PromptServer():
             dt = json.loads(out)
             if not "__metadata__" in dt:
                 return web.Response(status=404)
-            return web.json_response(dt["__metadata__"])
+            return web.json_response(dt["__metadata__"], dumps=dumps)
 
         @routes.get("/system_stats")
         async def system_stats(request):
@@ -546,11 +551,11 @@ class PromptServer():
                     }
                 ]
             }
-            return web.json_response(system_stats)
+            return web.json_response(system_stats, dumps=dumps)
 
         @routes.get("/prompt")
         async def get_prompt(request):
-            return web.json_response(self.get_queue_info())
+            return web.json_response(self.get_queue_info(), dumps=dumps)
 
         def node_info(node_class):
             obj_class = nodes.NODE_CLASS_MAPPINGS[node_class]
@@ -610,12 +615,12 @@ class PromptServer():
             max_items = request.rel_url.query.get("max_items", None)
             if max_items is not None:
                 max_items = int(max_items)
-            return web.json_response(self.prompt_queue.get_history(max_items=max_items))
+            return web.json_response(self.prompt_queue.get_history(max_items=max_items), dumps=dumps)
 
         @routes.get("/history/{prompt_id}")
         async def get_history_prompt_id(request):
             prompt_id = request.match_info.get("prompt_id", None)
-            return web.json_response(self.prompt_queue.get_history(prompt_id=prompt_id))
+            return web.json_response(self.prompt_queue.get_history(prompt_id=prompt_id), dumps=dumps)
 
         @routes.get("/queue")
         async def get_queue(request):
@@ -623,7 +628,7 @@ class PromptServer():
             current_queue = self.prompt_queue.get_current_queue_volatile()
             queue_info['queue_running'] = current_queue[0]
             queue_info['queue_pending'] = current_queue[1]
-            return web.json_response(queue_info)
+            return web.json_response(queue_info, dumps=dumps)
 
         @routes.post("/prompt")
         async def post_prompt(request):
@@ -655,10 +660,10 @@ class PromptServer():
                     outputs_to_execute = valid[2]
                     self.prompt_queue.put((number, prompt_id, prompt, extra_data, outputs_to_execute))
                     response = {"prompt_id": prompt_id, "number": number, "node_errors": valid[3]}
-                    return web.json_response(response)
+                    return web.json_response(response, dumps=dumps)
                 else:
                     logging.warning("invalid prompt: {}".format(valid[1]))
-                    return web.json_response({"error": valid[1], "node_errors": valid[3]}, status=400)
+                    return web.json_response({"error": valid[1], "node_errors": valid[3]}, status=400, dumps=dumps)
             else:
                 error = {
                     "type": "no_prompt",
@@ -666,7 +671,7 @@ class PromptServer():
                     "details": "No prompt provided",
                     "extra_info": {}
                 }
-                return web.json_response({"error": error, "node_errors": {}}, status=400)
+                return web.json_response({"error": error, "node_errors": {}}, status=400, dumps=dumps)
 
         @routes.post("/queue")
         async def post_queue(request):
@@ -713,7 +718,10 @@ class PromptServer():
 
     async def setup(self):
         timeout = aiohttp.ClientTimeout(total=None) # no timeout
-        self.client_session = aiohttp.ClientSession(timeout=timeout)
+        self.client_session = aiohttp.ClientSession(
+            timeout=timeout,
+            json_serialize=dumps,
+        )
 
     def add_routes(self):
         self.user_manager.add_routes(self.routes)
