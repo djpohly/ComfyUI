@@ -153,10 +153,7 @@ def cuda_malloc_warning():
 def prompt_autosave(q):
     while True:
         time.sleep(args.autosave_interval)
-        with q.mutex:
-            logging.info("Autosaving queue and history")
-            q.save_queue()
-            q.save_history()
+        q.save_to_disk()
 
 def prompt_worker(q, server_instance):
     current_time: float = 0.0

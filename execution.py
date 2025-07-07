@@ -1063,8 +1063,8 @@ class PromptQueue:
 
     def delete_history_item(self, id_to_delete):
         with self.mutex:
-            self.history.pop(id_to_delete, None)
-            self.history_dirty = True
+            if self.history.pop(id_to_delete, None) is not None:
+                self.history_dirty = True
 
     def set_flag(self, name, data):
         with self.mutex:
@@ -1079,6 +1079,11 @@ class PromptQueue:
                 return ret
             else:
                 return self.flags.copy()
+
+    def save_to_disk(self):
+        with self.mutex:
+            self.save_queue()
+            self.save_history()
 
     def load_history(self):
         if not self.persist:
